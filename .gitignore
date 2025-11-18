@@ -1,0 +1,45 @@
+# 1. Dependencies (Wajib di-ignore karena berat)
+node_modules/
+
+# 2. Environment Variables (Wajib di-ignore demi keamanan)
+.env
+.env.local
+.env.test
+
+# 3. Build/Distribution (File hasil compile)
+dist/
+build/
+out/
+
+# 4. Logs (File catatan error)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# 5. OS Files (File sampah sistem operasi)
+.DS_Store
+Thumbs.db# 1. Dependencies (Wajib di-ignore karena berat)
+node_modules/
+
+# 2. Environment Variables (Wajib di-ignore demi keamanan)
+.env
+.env.local
+.env.test
+
+# 3. Build/Distribution (File hasil compile)
+dist/
+build/
+out/
+
+# 4. Logs (File catatan error)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# 5. OS Files (File sampah sistem operasi)
+.DS_Store
+Thumbs.db
