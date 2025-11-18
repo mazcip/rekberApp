@@ -1,3 +1,4 @@
+
 # 1. Dependencies (Wajib di-ignore karena berat)
 node_modules/
 
@@ -43,3 +44,10 @@ logs/
 # 5. OS Files (File sampah sistem operasi)
 .DS_Store
 Thumbs.db
+=======
+# Object file
+*.o
+
+# Ada Library Information
+*.ali
+
