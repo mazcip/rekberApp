@@ -68,10 +68,21 @@ const validateBuyerLogin = [
     .withMessage('Valid email is required')
 ];
 
+const validateAdminLogin = [
+  body('username')
+    .notEmpty()
+    .withMessage('Username is required'),
+  
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
+];
+
 // Public routes
 router.post('/merchant/register', uploadMerchantDocuments, handleUploadError, validateMerchantRegistration, authController.registerMerchant);
 router.post('/merchant/login', validateMerchantLogin, authController.loginMerchant);
 router.post('/buyer/login', validateBuyerLogin, authController.loginBuyer);
+router.post('/admin/login', validateAdminLogin, authController.loginAdmin);
 
 // Protected routes
 router.get('/profile', verifyToken, allAuthenticated, authController.getProfile);

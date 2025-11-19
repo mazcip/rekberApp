@@ -518,10 +518,84 @@ const sendOTP = async (req, res) => {
   }
 };
 
+// Login Admin
+const loginAdmin = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    // Validate input
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
+
+    // Find user with admin role
+    const users = await sequelize.query(
+      'SELECT id, username, password_hash, role, is_active FROM users WHERE username = :username AND role = :role',
+      {
+        replacements: { username, role: 'admin' },
+        type: QueryTypes.SELECT
+      }
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if account is active
+    if (!user.is_active) {
+      return res.status(401).json({
+        success: false,
+        message: 'Account is not active'
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid username or password'
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user.id, user.role);
+
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role
+        },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Login failed',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   registerMerchant,
   loginMerchant,
   loginBuyer,
+  loginAdmin,
   getProfile,
   bindTelegram,
   sendOTP
