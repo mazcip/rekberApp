@@ -95,4 +95,24 @@ router.get(
   transactionController.getUserTransactions
 );
 
+// Request dispute (Buyer only)
+router.post(
+  '/:transaction_id/dispute',
+  verifyToken,
+  buyerOnly,
+  [
+    param('transaction_id')
+      .notEmpty()
+      .withMessage('Transaction ID is required'),
+    body('reason')
+      .notEmpty()
+      .withMessage('Reason is required'),
+    body('evidence_image_url')
+      .optional()
+      .isURL()
+      .withMessage('Evidence image URL must be a valid URL')
+  ],
+  transactionController.requestDispute
+);
+
 module.exports = router;

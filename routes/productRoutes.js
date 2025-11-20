@@ -14,33 +14,19 @@ const validateCreateProduct = [
   body('description')
     .isLength({ min: 10, max: 2000 })
     .withMessage('Description must be between 10 and 2000 characters'),
-  body('category')
-    .isIn(['electronics', 'fashion', 'home', 'sports', 'books', 'toys', 'food', 'health', 'automotive', 'other'])
-    .withMessage('Invalid category'),
+  body('category_id')
+    .isInt({ min: 1 })
+    .withMessage('Category ID must be a positive integer'),
   body('price')
     .isFloat({ min: 0.01 })
     .withMessage('Price must be a positive number'),
   body('stock')
     .isInt({ min: 1 })
     .withMessage('Stock must be at least 1'),
-  body('weight')
-    .isFloat({ min: 0.1 })
-    .withMessage('Weight must be a positive number'),
-  body('condition')
-    .isIn(['new', 'like_new', 'good', 'fair', 'poor'])
-    .withMessage('Invalid condition value'),
-  body('sku')
+  body('is_digital')
     .optional()
-    .isLength({ min: 3, max: 50 })
-    .withMessage('SKU must be between 3 and 50 characters'),
-  body('min_order')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Minimum order must be at least 1'),
-  body('max_order')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Maximum order must be at least 1')
+    .isBoolean()
+    .withMessage('is_digital must be a boolean value')
 ];
 
 // Validation middleware for updating a product
@@ -56,10 +42,10 @@ const validateUpdateProduct = [
     .optional()
     .isLength({ min: 10, max: 2000 })
     .withMessage('Description must be between 10 and 2000 characters'),
-  body('category')
+  body('category_id')
     .optional()
-    .isIn(['electronics', 'fashion', 'home', 'sports', 'books', 'toys', 'food', 'health', 'automotive', 'other'])
-    .withMessage('Invalid category'),
+    .isInt({ min: 1 })
+    .withMessage('Category ID must be a positive integer'),
   body('price')
     .optional()
     .isFloat({ min: 0.01 })
@@ -68,26 +54,10 @@ const validateUpdateProduct = [
     .optional()
     .isInt({ min: 0 })
     .withMessage('Stock must be a non-negative integer'),
-  body('weight')
+  body('is_digital')
     .optional()
-    .isFloat({ min: 0.1 })
-    .withMessage('Weight must be a positive number'),
-  body('condition')
-    .optional()
-    .isIn(['new', 'like_new', 'good', 'fair', 'poor'])
-    .withMessage('Invalid condition value'),
-  body('sku')
-    .optional()
-    .isLength({ min: 3, max: 50 })
-    .withMessage('SKU must be between 3 and 50 characters'),
-  body('min_order')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Minimum order must be at least 1'),
-  body('max_order')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Maximum order must be at least 1')
+    .isBoolean()
+    .withMessage('is_digital must be a boolean value')
 ];
 
 // Validation middleware for getting product details
@@ -103,10 +73,10 @@ const validateGetMerchantProducts = [
     .optional()
     .isIn(['pending', 'active', 'inactive', 'rejected'])
     .withMessage('Invalid status value'),
-  query('category')
+  query('category_id')
     .optional()
-    .isIn(['electronics', 'fashion', 'home', 'sports', 'books', 'toys', 'food', 'health', 'automotive', 'other'])
-    .withMessage('Invalid category'),
+    .isInt({ min: 1 })
+    .withMessage('Category ID must be a positive integer'),
   query('page')
     .optional()
     .isInt({ min: 1 })
@@ -122,6 +92,26 @@ const validateDeleteProduct = [
   param('productId')
     .isInt({ min: 1 })
     .withMessage('Product ID must be a positive integer')
+];
+
+// Validation middleware for admin get products
+const validateGetAllProducts = [
+  query('status')
+    .optional()
+    .isIn(['pending', 'active', 'inactive', 'rejected'])
+    .withMessage('Invalid status value'),
+  query('category_id')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Category ID must be a positive integer'),
+  query('page')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Page must be a positive integer'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Limit must be between 1 and 100')
 ];
 
 // Routes

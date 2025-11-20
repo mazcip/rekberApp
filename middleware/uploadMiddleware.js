@@ -13,19 +13,22 @@ const ensureDirectoryExists = (dirPath) => {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath;
-    
+
     // Determine upload path based on field name
     if (file.fieldname === 'ktp_image' || file.fieldname === 'ijazah_image') {
       uploadPath = path.join(__dirname, '../uploads/merchant');
     } else if (file.fieldname.startsWith('product_image')) {
       uploadPath = path.join(__dirname, '../uploads/products');
+    } else if (file.fieldname === 'image' && req.baseUrl.includes('/chats')) {
+      // For chat images, use public directory for direct access
+      uploadPath = path.join(__dirname, '../public/uploads/chats');
     } else {
       uploadPath = path.join(__dirname, '../uploads/others');
     }
-    
+
     // Ensure directory exists
     ensureDirectoryExists(uploadPath);
-    
+
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
@@ -41,7 +44,13 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   // Check if the file is an image
   if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
+    // Accept only JPG, JPEG, PNG images
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPG, JPEG, and PNG files are allowed'), false);
+    }
   } else {
     cb(new Error('Only image files are allowed'), false);
   }
@@ -56,11 +65,23 @@ const upload = multer({
   }
 });
 
+// Configure multer with 2MB size limit for chat images
+const uploadChatImage = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2MB for chat images
+  }
+});
+
 // Specific upload handlers for different use cases
 const uploadMerchantDocuments = upload.fields([
   { name: 'ktp_image', maxCount: 1 },
   { name: 'ijazah_image', maxCount: 1 }
 ]);
+
+// Specific upload handler for chat images
+const uploadChatSingleImage = uploadChatImage.single('image');
 
 const uploadProductImages = upload.fields([
   { name: 'product_image1', maxCount: 1 },
@@ -117,6 +138,7 @@ module.exports = {
   uploadProductImages,
   uploadSingle,
   uploadMultiple,
+  uploadChatSingleImage, // For chat image uploads
   getFileUrl,
   handleUploadError
 };

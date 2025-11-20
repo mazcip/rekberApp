@@ -84,6 +84,14 @@ router.post('/merchant/login', validateMerchantLogin, authController.loginMercha
 router.post('/buyer/login', validateBuyerLogin, authController.loginBuyer);
 router.post('/admin/login', validateAdminLogin, authController.loginAdmin);
 
+// Initial admin setup (only allowed if no admin exists)
+router.post('/admin/initial-setup', validateAdminLogin, authController.initialAdminSetup);
+
+// Logout route (just returns success, client handles token removal)
+router.post('/logout', (req, res) => {
+    res.json({ success: true, message: 'Logged out successfully' });
+});
+
 // Protected routes
 router.get('/profile', verifyToken, allAuthenticated, authController.getProfile);
 

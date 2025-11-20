@@ -16,13 +16,24 @@ const socketHandler = (io) => {
         return next(new Error('Authentication error'));
       }
 
-      // Verify JWT token (you might want to use the same verification logic as in authMiddleware)
+      // Verify JWT token (using the same verification logic as in authMiddleware)
       const jwt = require('jsonwebtoken');
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      // Get user details from database
+      let decoded;
+
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (jwtError) {
+        if (jwtError.name === 'JsonWebTokenError') {
+          return next(new Error('Invalid token'));
+        } else if (jwtError.name === 'TokenExpiredError') {
+          return next(new Error('Token expired'));
+        }
+        throw jwtError;
+      }
+
+      // Get user details from database (same as authMiddleware)
       const users = await sequelize.query(
-        'SELECT id, username, role FROM users WHERE id = :user_id',
+        'SELECT id, email, username, role, is_active FROM users WHERE id = :user_id',
         {
           replacements: { user_id: decoded.id },
           type: QueryTypes.SELECT
@@ -33,11 +44,37 @@ const socketHandler = (io) => {
         return next(new Error('User not found'));
       }
 
-      socket.user = users[0];
+      const user = users[0];
+
+      // Check if user is active (same as authMiddleware)
+      if (!user.is_active && user.role !== 'buyer') {
+        return next(new Error('Account is not active'));
+      }
+
+      // If user is a merchant, get merchant_id (same as authMiddleware)
+      if (user.role === 'merchant') {
+        const merchants = await sequelize.query(
+          'SELECT id FROM merchants WHERE user_id = :user_id',
+          {
+            replacements: { user_id: decoded.id },
+            type: QueryTypes.SELECT
+          }
+        );
+
+        if (merchants.length > 0) {
+          user.merchant_id = merchants[0].id;
+        }
+      }
+
+      socket.user = user;
       next();
     } catch (error) {
       console.error('Socket authentication error:', error);
-      next(new Error('Authentication error'));
+      if (error.message === 'Invalid token' || error.message === 'Token expired' || error.message === 'Account is not active' || error.message === 'User not found') {
+        next(new Error(error.message));
+      } else {
+        next(new Error('Authentication error'));
+      }
     }
   });
 
@@ -108,7 +145,7 @@ const socketHandler = (io) => {
         
         // Send chat history to the user
         const messages = await sequelize.query(
-          `SELECT cm.id, cm.sender_id, cm.message, cm.message_type, cm.created_at,
+          `SELECT cm.id, cm.sender_id, cm.message, cm.message_type, cm.attachment_url, cm.created_at,
                   u.username, u.role
            FROM chat_messages cm
            JOIN users u ON cm.sender_id = u.id
@@ -138,50 +175,67 @@ const socketHandler = (io) => {
     // Handle joining arbitrase chat (group room)
     socket.on('joinArbitraseChat', async (data) => {
       try {
-        const { transaction_id } = data;
-        
+        const { transactionId, roomId } = data; // Accept both field names for compatibility
+        const transaction_id = transactionId || roomId; // Use either field name
+
         if (!transaction_id) {
           socket.emit('error', { message: 'Transaction ID is required' });
           return;
         }
-        
+
         // Verify transaction exists and is in a state that requires arbitrase
-        const transactions = await sequelize.query(
-          `SELECT t.id, t.buyer_id, t.merchant_id, t.status, m.user_id as merchant_user_id
+        // First, try to find transaction by transaction_id
+        let query = `
+          SELECT t.id, t.invoice_number, t.buyer_id, t.merchant_id, t.status, m.user_id as merchant_user_id
            FROM transactions t
-           JOIN merchants m ON t.merchant_id = m.id
-           WHERE t.transaction_id = :transaction_id`,
-          {
+           LEFT JOIN merchants m ON t.merchant_id = m.id
+           WHERE t.invoice_number = :transaction_id
+        `;
+
+        // If not found with invoice_number, try transaction_id field
+        let transactions = await sequelize.query(query, {
+          replacements: { transaction_id },
+          type: QueryTypes.SELECT
+        });
+
+        if (transactions.length === 0) {
+          // Try with id field if invoice_number doesn't match
+          query = `
+            SELECT t.id, t.invoice_number, t.buyer_id, t.merchant_id, t.status, m.user_id as merchant_user_id
+            FROM transactions t
+            LEFT JOIN merchants m ON t.merchant_id = m.id
+            WHERE t.id = :transaction_id
+          `;
+
+          transactions = await sequelize.query(query, {
             replacements: { transaction_id },
             type: QueryTypes.SELECT
-          }
-        );
-        
+          });
+        }
+
         if (transactions.length === 0) {
           socket.emit('error', { message: 'Transaction not found' });
           return;
         }
-        
+
         const transaction = transactions[0];
-        
-        // Check if user is authorized (buyer, merchant, or admin)
-        if (socket.user.role !== 'admin' && 
-            socket.user.id !== transaction.buyer_id && 
-            socket.user.id !== transaction.merchant_user_id) {
-          socket.emit('error', { message: 'Not authorized to join this chat' });
+
+        // Check if user is authorized (admin only for arbitration rooms)
+        if (socket.user.role !== 'admin') {
+          socket.emit('error', { message: 'Only admins can join arbitration rooms' });
           return;
         }
-        
-        // Join arbitrase room
-        const roomName = `arbitrase_${transaction_id}`;
+
+        // Join arbitrase room - use the invoice_number as the room identifier
+        const roomName = `arbitrase_${transaction.invoice_number}`;
         socket.join(roomName);
-        
+
         // Track room participants
         if (!roomParticipants.has(roomName)) {
           roomParticipants.set(roomName, new Set());
         }
         roomParticipants.get(roomName).add(socket.user.id);
-        
+
         // Notify others in the room
         socket.to(roomName).emit('userJoined', {
           user: {
@@ -190,10 +244,10 @@ const socketHandler = (io) => {
             role: socket.user.role
           }
         });
-        
+
         // Send chat history to the user
         const messages = await sequelize.query(
-          `SELECT cm.id, cm.sender_id, cm.message, cm.message_type, cm.created_at,
+          `SELECT cm.id, cm.sender_id, cm.message, cm.message_type, cm.attachment_url, cm.created_at,
                   u.username, u.role
            FROM chat_messages cm
            JOIN users u ON cm.sender_id = u.id
@@ -201,19 +255,19 @@ const socketHandler = (io) => {
            ORDER BY cm.created_at ASC
            LIMIT 50`,
           {
-            replacements: { room_id: transaction_id },
+            replacements: { room_id: transaction.invoice_number },
             type: QueryTypes.SELECT
           }
         );
-        
+
         socket.emit('chatHistory', {
-          room_id: transaction_id,
+          room_id: transaction.invoice_number,
           room_type: 'arbitrase',
           messages: messages
         });
-        
-        socket.emit('joinedRoom', { room_id: transaction_id, room_type: 'arbitrase' });
-        
+
+        socket.emit('joinedRoom', { room_id: transaction.invoice_number, room_type: 'arbitrase' });
+
       } catch (error) {
         console.error('Join arbitrase chat error:', error);
         socket.emit('error', { message: 'Failed to join chat' });
@@ -223,49 +277,81 @@ const socketHandler = (io) => {
     // Handle sending messages
     socket.on('sendMessage', async (data) => {
       try {
-        const { room_id, room_type, message, message_type = 'text' } = data;
-        
-        if (!room_id || !room_type || !message) {
-          socket.emit('error', { message: 'Room ID, room type, and message are required' });
+        // Destructure data per requirements - accept both field naming conventions
+        const { transactionId, roomId, message, attachment, room_type } = data;
+        const senderId = socket.user.id;
+
+        // Use either transactionId or roomId, and either message or messageText, and either attachment or attachmentUrl
+        const finalTransactionId = transactionId || roomId;
+        const finalMessage = message;
+        const finalAttachment = attachment;
+        const finalRoomType = room_type || 'arbitrase'; // Default to arbitrase if not specified
+
+        // Validate required fields
+        if (!finalTransactionId || !finalRoomType) {
+          socket.emit('error', { message: 'Transaction ID and room type are required' });
           return;
         }
-        
+
+        // For image messages, either message text or attachment must be present
+        if (!finalMessage && !finalAttachment) {
+          socket.emit('error', { message: 'Message text or attachment is required' });
+          return;
+        }
+
         // Validate room type
-        if (!['transaction', 'arbitrase'].includes(room_type)) {
+        if (!['transaction', 'arbitrase'].includes(finalRoomType)) {
           socket.emit('error', { message: 'Invalid room type' });
           return;
         }
-        
+
         // Verify user is part of this room
-        const roomName = `${room_type}_${room_id}`;
+        const roomName = `${finalRoomType}_${finalTransactionId}`;
         if (!socket.rooms.has(roomName)) {
           socket.emit('error', { message: 'You are not in this room' });
           return;
         }
-        
+
+        // For arbitration rooms, only admins can send messages
+        if (finalRoomType === 'arbitrase') {
+          if (socket.user.role !== 'admin') {
+            socket.emit('error', { message: 'Only admins can send messages in arbitration rooms' });
+            return;
+          }
+        }
+
+        // Determine message type based on presence of attachment
+        let messageType = 'text';
+        if (finalAttachment && !finalMessage) {
+          messageType = 'image';
+        } else if (finalAttachment && finalMessage) {
+          messageType = 'text'; // Mixed content, default to text
+        }
+
         // Save message to database
         const messageResult = await sequelize.query(
-          `INSERT INTO chat_messages 
-           (room_id, room_type, sender_id, message, message_type) 
-           VALUES (:room_id, :room_type, :sender_id, :message, :message_type)`,
+          `INSERT INTO chat_messages
+           (room_id, room_type, sender_id, message, message_type, attachment_url)
+           VALUES (:room_id, :room_type, :sender_id, :message, :message_type, :attachment_url)`,
           {
             replacements: {
-              room_id,
-              room_type,
-              sender_id: socket.user.id,
-              message,
-              message_type
+              room_id: finalTransactionId,
+              room_type: finalRoomType,
+              sender_id: senderId,
+              message: finalMessage || '',
+              message_type: messageType,
+              attachment_url: finalAttachment || null
             },
             type: QueryTypes.INSERT
           }
         );
-        
+
         const messageId = messageResult[0];
-        
+
         // Get message with user details
         const messageData = await sequelize.query(
-          `SELECT cm.id, cm.sender_id, cm.message, cm.message_type, cm.created_at,
-                  u.username, u.role
+          `SELECT cm.id, cm.room_id, cm.room_type, cm.sender_id, cm.message, cm.message_type, cm.attachment_url, cm.created_at,
+                  u.username as sender_name, u.role
            FROM chat_messages cm
            JOIN users u ON cm.sender_id = u.id
            WHERE cm.id = :message_id`,
@@ -274,10 +360,57 @@ const socketHandler = (io) => {
             type: QueryTypes.SELECT
           }
         );
-        
+
         // Broadcast message to all users in the room
         io.to(roomName).emit('newMessage', messageData[0]);
-        
+
+        // Optional Telegram notification (non-blocking)
+        if (process.env.TELEGRAM_BOT_TOKEN && process.env.ADMIN_TELEGRAM_CHAT_ID) {
+          // Send notification in the background to avoid blocking the message sending
+          (async () => {
+            try {
+              const TelegramBot = require('node-telegram-bot-api');
+              const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN);
+              let adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
+
+              // Send notification to admin if sender is not admin
+              if (socket.user.role !== 'admin') {
+                let notificationMessage = `🔔 *New Arbitration Chat Message*\n\n`;
+                notificationMessage += `*From:* ${socket.user.username} (${socket.user.role})\n`;
+                notificationMessage += `*Transaction:* ${finalTransactionId}\n`;
+                notificationMessage += `*Room Type:* ${finalRoomType}\n\n`;
+
+                if (finalMessage) {
+                  notificationMessage += `*Message:* ${finalMessage}\n`;
+                }
+
+                if (finalAttachment) {
+                  notificationMessage += `*Attachment:* Image uploaded\n`;
+                  // Try to send the image if it's a valid URL
+                  try {
+                    // Construct full URL for the attachment
+                    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+                    const fullImageUrl = finalAttachment.startsWith('http') ? finalAttachment : `${baseUrl}${finalAttachment}`;
+
+                    await bot.sendPhoto(adminChatId, fullImageUrl, {
+                      caption: `Image from ${socket.user.username} regarding transaction ${finalTransactionId}`
+                    });
+                  } catch (imageError) {
+                    console.error('Error sending image to Telegram:', imageError.message);
+                    // If sending image fails, just send the text notification
+                    await bot.sendMessage(adminChatId, notificationMessage, { parse_mode: 'Markdown' });
+                  }
+                } else {
+                  await bot.sendMessage(adminChatId, notificationMessage, { parse_mode: 'Markdown' });
+                }
+              }
+            } catch (telegramError) {
+              console.error('Telegram notification error:', telegramError.message);
+              // Don't let Telegram errors affect the main message sending functionality
+            }
+          })();
+        }
+
       } catch (error) {
         console.error('Send message error:', error);
         socket.emit('error', { message: 'Failed to send message' });

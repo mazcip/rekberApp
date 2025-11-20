@@ -426,11 +426,109 @@ const getAllWtbRequests = async (req, res) => {
   }
 };
 
+// Get Pending WTB Requests for Admin
+const getPendingWtbRequests = async (req, res) => {
+  try {
+    // Get WTB requests with pending status
+    const requests = await sequelize.query(
+      `SELECT w.id, w.title, w.description, w.budget_min, w.budget_max,
+              w.status, w.created_at, c.name as category_name, u.username as buyer_username
+       FROM wtb_requests w
+       JOIN categories c ON w.category_id = c.id
+       JOIN users u ON w.buyer_id = u.id
+       WHERE w.status = 'pending'
+       ORDER BY w.created_at DESC`,
+      {
+        type: QueryTypes.SELECT
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        requests: requests,
+        count: requests.length
+      }
+    });
+  } catch (error) {
+    console.error('Get pending WTB requests error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get pending WTB requests',
+      error: error.message
+    });
+  }
+};
+
+// Approve or Reject WTB Request (Admin)
+const updateWtbRequestStatus = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status } = req.body;
+
+    // Validate status
+    if (!['active', 'rejected', 'closed'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid status. Valid statuses are: active, rejected, closed'
+      });
+    }
+
+    // Check if WTB request exists
+    const requests = await sequelize.query(
+      'SELECT id FROM wtb_requests WHERE id = :request_id',
+      {
+        replacements: {
+          request_id: requestId
+        },
+        type: QueryTypes.SELECT
+      }
+    );
+
+    if (requests.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'WTB request not found'
+      });
+    }
+
+    // Update status
+    await sequelize.query(
+      'UPDATE wtb_requests SET status = :status WHERE id = :request_id',
+      {
+        replacements: {
+          request_id: requestId,
+          status: status
+        },
+        type: QueryTypes.UPDATE
+      }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `WTB request status updated to ${status}`,
+      data: {
+        id: requestId,
+        status: status
+      }
+    });
+  } catch (error) {
+    console.error('Update WTB request status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update WTB request status',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createWtbRequest,
   getBuyerWtbRequests,
   getWtbRequest,
   updateWtbRequest,
   deleteWtbRequest,
-  getAllWtbRequests
+  getAllWtbRequests,
+  getPendingWtbRequests,
+  updateWtbRequestStatus
 };

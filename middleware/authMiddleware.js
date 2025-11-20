@@ -6,19 +6,26 @@ const { QueryTypes } = require('sequelize');
 const verifyToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
         message: 'Access token is required'
       });
     }
-    
+
     const token = authHeader.split(' ')[1];
-    
+
+    if (!token || token === 'undefined') {
+      return res.status(401).json({
+        success: false,
+        message: 'Access token is required'
+      });
+    }
+
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
     // Get user from database
     const users = await sequelize.query(
       'SELECT id, email, username, role, is_active FROM users WHERE id = :userId',
@@ -27,16 +34,16 @@ const verifyToken = async (req, res, next) => {
         type: QueryTypes.SELECT
       }
     );
-    
+
     if (users.length === 0) {
       return res.status(401).json({
         success: false,
         message: 'Invalid token - user not found'
       });
     }
-    
+
     const user = users[0];
-    
+
     // Check if user is active
     if (!user.is_active && user.role !== 'buyer') {
       return res.status(401).json({
@@ -44,7 +51,7 @@ const verifyToken = async (req, res, next) => {
         message: 'Account is not active'
       });
     }
-    
+
     // If user is a merchant, get merchant_id
     if (user.role === 'merchant') {
       const merchants = await sequelize.query(
@@ -54,12 +61,12 @@ const verifyToken = async (req, res, next) => {
           type: QueryTypes.SELECT
         }
       );
-      
+
       if (merchants.length > 0) {
         user.merchant_id = merchants[0].id;
       }
     }
-    
+
     // Add user info to request
     req.user = user;
     next();
@@ -93,14 +100,14 @@ const requireRole = (roles) => {
         message: 'Authentication required'
       });
     }
-    
+
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
         message: 'Access denied - insufficient permissions'
       });
     }
-    
+
     next();
   };
 };

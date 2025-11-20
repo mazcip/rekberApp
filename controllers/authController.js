@@ -591,6 +591,78 @@ const loginAdmin = async (req, res) => {
   }
 };
 
+// Initial Admin Setup (only if no admin user exists)
+const initialAdminSetup = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    // Validate input
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required'
+      });
+    }
+
+    // Check if any admin already exists
+    const existingAdmins = await sequelize.query(
+      'SELECT id FROM users WHERE role = "admin"',
+      {
+        type: QueryTypes.SELECT
+      }
+    );
+
+    if (existingAdmins.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admin user already exists. Initial setup is only allowed once.'
+      });
+    }
+
+    // Hash password
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // Create admin user
+    const result = await sequelize.query(
+      `INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
+       VALUES (:username, :password_hash, 'admin', TRUE, NOW(), NOW())`,
+      {
+        replacements: {
+          username,
+          password_hash: passwordHash
+        },
+        type: QueryTypes.INSERT
+      }
+    );
+
+    const userId = result[0];
+
+    // Generate JWT token
+    const token = generateToken(userId, 'admin');
+
+    res.status(201).json({
+      success: true,
+      message: 'Initial admin user created successfully',
+      data: {
+        user: {
+          id: userId,
+          username,
+          role: 'admin'
+        },
+        token
+      }
+    });
+  } catch (error) {
+    console.error('Initial admin setup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Initial admin setup failed',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   registerMerchant,
   loginMerchant,
@@ -598,5 +670,6 @@ module.exports = {
   loginAdmin,
   getProfile,
   bindTelegram,
-  sendOTP
+  sendOTP,
+  initialAdminSetup
 };

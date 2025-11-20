@@ -14,6 +14,7 @@ CREATE TABLE users (
     otp_expires_at DATETIME NULL, -- Waktu kadaluarsa OTP
     buyer_tier ENUM('bronze', 'silver', 'gold') DEFAULT 'bronze',
     total_success_trx INT DEFAULT 0,
+    user_credit DECIMAL(15,2) DEFAULT 0.00, -- BARU: Saldo Kredit Buyer untuk Redeem Voucher
     is_active BOOLEAN DEFAULT FALSE, -- Kontrol status akun (KYC Approval)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -63,7 +64,7 @@ CREATE TABLE categories (
     FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE SET NULL
 );
 
--- 5. Tabel Products - NAME
+-- 5. Tabel Products
 CREATE TABLE products (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     merchant_id BIGINT NOT NULL,
@@ -106,7 +107,7 @@ CREATE TABLE wtb_requests (
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
--- 7. Tabel Transactions (Inti Rekber) - SINKRON DENGAN LOGIKA KEUANGAN
+-- 7. Tabel Transactions (Inti Rekber)
 CREATE TABLE transactions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     invoice_number VARCHAR(50) UNIQUE NOT NULL, -- Nomor unik transaksi
@@ -126,7 +127,7 @@ CREATE TABLE transactions (
     
     payment_method VARCHAR(50),
     
-    -- Status & Due Date -- DITAMBAH 'FAILED' DAN 'EXPIRED'
+    -- Status & Due Date 
     status ENUM('UNPAID', 'PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'COMPLAIN', 'CANCELLED', 'DISPUTE', 'FAILED', 'EXPIRED') DEFAULT 'UNPAID',
     duitku_ref VARCHAR(100), -- ID referensi PG
     due_date DATETIME NULL, -- Waktu batas bayar
@@ -165,7 +166,67 @@ CREATE TABLE withdrawals (
     FOREIGN KEY (merchant_id) REFERENCES merchants(id)
 );
 
+
+-- 9. BARU: Tabel VOUCHERS (Pengaturan Admin)
+CREATE TABLE vouchers (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(30) UNIQUE NOT NULL, -- Kode unik yang diinput buyer
+    value DECIMAL(15,2) NOT NULL, -- Nominal Saldo yang didapat
+    admin_user_id BIGINT NOT NULL, -- Admin yang membuat
+    expires_at DATETIME NULL, -- Waktu batas penggunaan
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (admin_user_id) REFERENCES users(id)
+);
+
+-- 10. BARU: Tabel VOUCHER USAGES (Log Penggunaan)
+CREATE TABLE voucher_usages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    voucher_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL, -- ID Buyer yang menukarkan
+    redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    -- UNIK INDEX: Memastikan 1 voucher hanya bisa dipakai 1x oleh 1 user
+    UNIQUE KEY unique_user_voucher (voucher_id, user_id) 
+);
+
+
+-- 12. Tabel TRANSACTION LOGS (Audit Trail)
+CREATE TABLE transaction_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id BIGINT NOT NULL,
+    user_id BIGINT,
+    action VARCHAR(50) NOT NULL, -- e.g., 'created', 'paid', 'completed', 'cancelled', 'dispute'
+    old_status ENUM('UNPAID', 'PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'COMPLAIN', 'CANCELLED', 'DISPUTE', 'FAILED', 'EXPIRED'),
+    new_status ENUM('UNPAID', 'PAID', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'COMPLAIN', 'CANCELLED', 'DISPUTE', 'FAILED', 'EXPIRED'),
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- 13. Tabel CHAT MESSAGES (Real-time Communication)
+CREATE TABLE chat_messages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    room_id VARCHAR(100) NOT NULL, -- Could be transaction_id or other room identifiers
+    room_type ENUM('transaction', 'arbitrase', 'support') NOT NULL, -- Type of chat room
+    sender_id BIGINT NOT NULL,
+    message TEXT NOT NULL,
+    message_type ENUM('text', 'image', 'file', 'system') DEFAULT 'text',
+    attachment_url VARCHAR(255) NULL, -- URL for uploaded images/files
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender_id) REFERENCES users(id)
+);
+
 -- Indexing untuk performa
 CREATE INDEX idx_product_status ON products(status);
 CREATE INDEX idx_trx_status ON transactions(status);
 CREATE INDEX idx_merchant_username ON merchants(username);
+CREATE INDEX idx_chat_messages_room ON chat_messages(room_id, room_type);
+CREATE INDEX idx_chat_messages_sender ON chat_messages(sender_id);
+CREATE INDEX idx_transaction_logs_trx_id ON transaction_logs(transaction_id);
+
+-- Tambahkan user admin default
+INSERT INTO users (email, username, password_hash, role, is_active) VALUES
+('admin@rekber.com', 'bhara', '$2b$10$6ZKbb4Cc8.WK8VM7VH9lxe4oFY.U62rAoq4Jq1YbB.8Yq3FQvVqZC', 'admin', TRUE);
